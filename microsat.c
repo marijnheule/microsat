@@ -2,7 +2,7 @@
 
   The MIT License
 
-  Copyright (c) 2014-2017 Marijn Heule
+  Copyright (c) 2014-2018 Marijn Heule
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -25,35 +25,36 @@
 *************************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define END        -9
 #define MEM_MAX     100000000
 #define MARK        2
 #define UNSAT       0
 #define SAT         1
+#define UNKNOWN	    2
+// #define STANDALONE
 
-struct solver { // The variables in the struct are described in the parser
-  int  *DB, nVars, nClauses, mem_used, mem_fixed, maxLemmas, nLemmas,
+#ifndef STANDALONE
+#include "microsat.h"
+#endif
+
+#ifdef STANDALONE
+struct solver { // The variables in the struct are described in the allocate procedure
+  int  *DB, nVars, nClauses, mem_used, mem_fixed, mem_max, maxLemmas, nLemmas,
        *assumptions, *assumeHead, restarts, nConflicts, *model, *reason, *falseStack,
        *false, *first, *heap, heapSize, *lookup, *score, *forced, *processed, *assigned; };
+#endif
 
-#define SET_MARK(a)	{ int lit = (a);        \
-                          if (S->false[ lit ] != MARK) { \
-			    S->score[ abs(lit) ] = (3 * S->score[ abs(lit) ] + (S->nConflicts << 5)) >> 2; \
-			    if (S->lookup[abs(lit)] != END) heapUp(S, abs(lit)); } \
-                          S->false[ lit ] = MARK; }
-#define ASSIGN(a,r)	{ S->false[-(a)] = 1 + 5*forced; \
-                          *(S->assigned++) = -(a); \
-                          S->reason[abs(a)] = 1 + (int) ((r)-S->DB); \
-                          S->model[abs(a)] = ((a)>0); }
-#define ASSIGN_DEC(a)	{ S->false[-(a)] = 1; \
-                          *(S->assigned++) = -(a); \
-                          S->reason[abs(a)] = 0; }
-#define UNASSIGN(a)     { int lit = (a); S->false[ lit ] = 0; \
-                          if (S->lookup[abs(lit)] == END) { \
-                            S->lookup[abs(lit)] = ++S->heapSize; \
-                            heapUp(S, abs(lit)); } }
-#define ADD_WATCH(l,m)  { S->DB[(m)] = S->first[(l)]; S->first[(l)] = (m); }
+void assign (struct solver* S, int* reason, int forced) {
+  int lit = reason[0];
+  S->false[-lit] = 1 + 5*forced;
+  *(S->assigned++) = -lit;
+  S->reason[abs(lit)] = 1 + (int) ((reason)-S->DB);
+  S->model[abs(lit)] = (lit > 0); }
+
+void addWatch (struct solver* S, int lit, int mem) {
+  S->DB[mem] = S->first[lit]; S->first[lit] = mem; }
 
 inline int abs (int a) { return (a > 0)?(a):(-a); }
 
@@ -61,13 +62,18 @@ void resetAssumptions (struct solver *S) { S->assumeHead = S->assumptions; }
 void assume (struct solver *S, int lit) { *S->assumeHead = lit; S->assumeHead++; }
 
 int* getMemory (struct solver *S, int mem_size) {
-  if (S->mem_used + mem_size > MEM_MAX) printf("Out of Memory\n");
+#ifdef STANDALONE
+  if (S->mem_used + mem_size > S.max_mem) printf("Out of Memory\n");
+#endif
+  if (S->mem_used + mem_size > S->mem_max) {
+    S->mem_max = (3 * S->mem_max) >> 1;
+    S->DB = realloc (S->DB, sizeof(int) * S->mem_max); }
   int *store = (S->DB + S->mem_used);
   S->mem_used += mem_size;
   return store; }
 
 int* addClause (struct solver *S, int* input, int size) {
-  if (size > 1) { ADD_WATCH (input[0], S->mem_used); ADD_WATCH (input[1], S->mem_used + 1); }
+  if (size > 1) { addWatch (S, input[0], S->mem_used); addWatch (S, input[1], S->mem_used + 1); }
   int i, *clause = getMemory (S, size + 3) + 2;
   for (i = 0; i < size; ++i) { clause[ i ] = input[ i ]; } clause[ i ] = 0;
   return clause; }
@@ -89,7 +95,7 @@ void reduceDB (struct solver* S) {         // Removes "less useful" lemmas from 
     int size = 0, count = 0, *lem = head+2;                       // Get the lemma to which the head is pointing
     while (*lem) {                                      size++;   // Count the number of literals
       if ((*lem > 0) == S->model[ abs(*lem) ]) count++;  lem++; } // Count the number of satisfied literals
-    if (count < 4) { addClause (S, head+2, size); S->nLemmas++; } // If the latter is smaller than four, add it back
+    if (count < 6) { addClause (S, head+2, size); S->nLemmas++; } // If the latter is smaller than four, add it back
     head = lem+1; } }                                             // Move the head to the next position after the lemma
 
 void heapRemoveTop (struct solver* S) {                    // Removes the top of the binary heap
@@ -111,6 +117,17 @@ void heapUp (struct solver* S, int var) {		   // Moves a var(iable) up in the bi
     S->lookup[S->heap[p]] = p; p = (p-1)>>1; }             // Update the heap lookup table and update the position
   S->heap[p] = var; S->lookup[var] = p; }                  // Set the new position in the heap and update the lookup
 
+void setMark (struct solver* S, int lit) {
+  if (S->false[ lit ] != MARK) {
+    S->score[ abs(lit) ] = (3 * S->score[ abs(lit) ] + (S->nConflicts << 5)) >> 2;
+    if (S->lookup[abs(lit)] != END) heapUp(S, abs(lit)); }
+  S->false[ lit ] = MARK; }
+
+void unassign (struct solver* S, int lit) {
+  S->false[ lit ] = 0;
+  if (S->lookup[abs(lit)] == END) {
+    S->lookup[abs(lit)] = ++S->heapSize; heapUp (S, abs(lit)); } }
+
 int implied (struct solver* S, int lit) {                  // Check if lit(eral) is implied by MARK literals
   if (S->false[lit] > MARK) return (S->false[lit] & MARK); // If checked before return old result
   if (!S->reason[abs(lit)]) return 0;                      // In case lit is a decision, it is not implied
@@ -123,15 +140,15 @@ int implied (struct solver* S, int lit) {                  // Check if lit(eral)
 int* analyze (struct solver* S, int* clause) {     // Compute a resolvent from falsified clause
   S->nLemmas++; S->restarts++; S->nConflicts++;    // Bump restarts and bump maximum score
 
-  while (*clause) SET_MARK(*(clause++));           // MARK all literals in falsified clause
+  while (*clause) setMark (S,*(clause++));         // MARK all literals in falsified clause
   while (S->reason[ abs(*(--S->assigned)) ]) {     // Loop on variables on falseStack
     if (S->false[ *S->assigned ] == MARK) {        // If the tail of the stack is MARK
       int *check = S->assigned;                    // Pointer to check if first-UIP is reached
       while (S->false[ *(--check) ] != MARK)	   // Check for a MARK literal before decision
         if (!S->reason[ abs(*check) ]) goto build; // Otherwise it is the first-UIP so break
       clause=(S->DB+S->reason[abs(*S->assigned)]); // Get the reason and ignore first literal
-      while (*clause) SET_MARK(*(clause++)); }     // MARK all literals in reason
-    UNASSIGN(*S->assigned); }                      // Unassign the tail of the stack
+      while (*clause) setMark (S, *(clause++)); }  // MARK all literals in reason
+    unassign (S, *S->assigned); }                  // Unassign the tail of the stack
 
   build:; int buffer[ S->nVars ], size = 0;
   int *p = S->assigned;                            // Loop from tail to front
@@ -143,18 +160,18 @@ int* analyze (struct solver* S, int* clause) {     // Compute a resolvent from f
     S->false[ *(p--) ] = 1; }                      // Reset the MARK flag for all variables on the stack
 
   while (S->assigned > S->processed)
-    UNASSIGN(*(S->assigned--));                    // Unassign all lits between tail & head
-  UNASSIGN(*S->assigned);                          // Assigned now equal to processed
+    unassign (S, *(S->assigned--));                // Unassign all lits between tail & head
+  unassign (S, *S->assigned);                      // Assigned now equal to processed
   return addClause (S, buffer, size); }            // Add new conflict clause to redundant DB
 
 void analyzeFinal (struct solver *S, int *clause) {
-  while (*clause) SET_MARK(*(clause++));           // MARK all literals in the reason clause
+  while (*clause) setMark (S, *(clause++));        // MARK all literals in the reason clause
   while (S->assigned > S->forced) {
     int lit = *(--S->assigned);
     if (S->false[ lit ] == MARK) {
       if (S->reason[abs(lit)]) {
         clause = (S->DB+S->reason[abs(lit)]);
-        while (*clause) SET_MARK(*(clause++)); }
+        while (*clause) setMark (S, *(clause++)); }
       else printf("%i ", -lit); } }
   printf("0\n"); }
 
@@ -172,15 +189,15 @@ int propagate (struct solver* S) {                 // Performs unit propagation
           clause[1] = clause[i]; clause[i] = lit;  // Swap literals
           int store = *watch;                      // Store the old watch
           *watch =  S->DB[ *watch ];               // Remove the watch from the list of lit
-          ADD_WATCH (clause[1], store);            // Add the watch to the list of clause[1]
+          addWatch (S, clause[1], store);          // Add the watch to the list of clause[1]
           goto next_clause; }                      // Goto the next watched clause
       clause[1] = lit; watch = (S->DB + *watch);   // Set lit at clause[1] and set next watch
       if ( S->false[ -clause[0] ]) continue; 	   // If the other watched literal is satisfied continue
       if (!S->false[  clause[0] ]) {               // If the other watched literal is falsified,
-        ASSIGN (clause[0], clause); }              // A unit clause is found, and the reason is set
+        assign (S, clause, forced); }              // A unit clause is found, and the reason is set
       else if (forced) return UNSAT;               // Found a root level conflict -> UNSAT
       else { int *lemma = analyze (S, clause);	   // Analyze the conflict return a conflict clause
-        ASSIGN (lemma[ 0 ], lemma);                // Assign the conflict clause as a unit
+        assign (S, lemma, forced);                 // Assign the conflict clause as a unit
         forced = !lemma[1]; break; }               // In case a unit clause is found, set forced flag
       next_clause: ; } }                           // Set position for next clause
   if (forced) S->forced = S->processed;	           // Set S->forced if applicable
@@ -192,13 +209,15 @@ int luby (int x) {                                 // Find the next number in th
   while (size-1 != x) { size = (size-1)>>1; seq--; x = x % size; }
   return seq; }
 
-int solve (struct solver *S) {
+int solve (struct solver *S, int limit) {
   int restarts = 0, decision, shift = luby (restarts);
   for (;;) {                                  // Main loop
     if (propagate (S) == UNSAT) return UNSAT; // UP returns UNSAT for root level conflict
 
+    if ((limit > 0) && (S->nLemmas > limit)) return UNKNOWN;
+
     if (S->restarts > (100 << shift) || S->nLemmas > S->maxLemmas) {          // After more than (100 << shift) conflicts
-      while (S->assigned > S->forced) UNASSIGN(*(--S->assigned));             // Remove all false lits from falseStack
+      while (S->assigned > S->forced) unassign (S, *(--S->assigned));         // Remove all false lits from falseStack
       S->processed = S->forced; S->restarts = 0; shift = luby (++restarts); } // Reset pointers and restart counter
 
     if (S->nLemmas > S->maxLemmas) reduceDB (S);                        // Reduce the DB when it contains too many lemmas
@@ -219,21 +238,19 @@ int solve (struct solver *S) {
       heapRemoveTop (S); }                                             // Otherwise remove the top from the heap
     if (!S->heapSize) return !UNSAT;                                   // A solution is found when the heap is empty
     if (!decision)                                                     // If no assumption and still free variable
-      decision = S->model[ S->heap[0] ] ? S->heap[0] : -S->heap[0];    // Assign decision based on current model
-    ASSIGN_DEC (decision); } }
+      decision = S->model[ S->heap[0] ] ? S->heap[0] : -S->heap[0];    // Pick decision based on current model
+    S->false[-decision] = 1;                                           // Assigned the decision literal to true
+    *(S->assigned++) = -decision;                                      // And push it on the assigned stack
+    S->reason[abs(decision)] = 0; } }                                  // Decisions have no reason clauses
 
-int parse (struct solver* S, char* filename) {
-  int forced = 1, tmp; FILE *input = fopen (filename, "r");
-  do { tmp = fscanf (input, " p cnf %i %i \n", &S->nVars, &S->nClauses); // Read the first line
-    if (tmp > 0 && tmp != EOF) break; tmp = fscanf (input, "%*s\n"); }   // In case a commment line was found
-  while (tmp != 2 && tmp != EOF);                                        // Skip it and read next line
-  int nZeros = S->nClauses, buffer [S->nVars], size = 0, n = S->nVars;   // Make a local buffer
-
+void allocate (struct solver* S, int n, int m) {
+  S->nVars       = n;
+  S->nClauses    = m;
   S->mem_used    = 0;                  // The number of integers allocated in the DB
   S->nLemmas     = 0;                  // The number of learned clauses -- redundant means learned
   S->nConflicts  = 0;                  // Under of conflicts which is used to updates scores
   S->restarts    = 0;                  // Counter used for deciding when to restart
-  S->maxLemmas   = 2 + (S->nClauses >> 2); // The maximum number of lemmas
+  S->maxLemmas   = 2 + (m >> 2);       // Initial maximum number of learnt clauses
   S->assumptions = getMemory (S, n+1); // List of assumptions (for incremental SAT)
   S->model       = getMemory (S, n+1); // Full assignment of the (Boolean) variables (initially set to false)
   S->score       = getMemory (S, n+1); // Variable score (based on involvement in recent conflicts).
@@ -251,6 +268,16 @@ int parse (struct solver* S, char* filename) {
 
   int i; for (i = 1; i <= n; ++i) { S->heap[i-1] = i; S->lookup[i] = i-1; S->model[i] = 0;
     S->score[i] = 1; S->false[i] = S->false[-i] = 0; S->first[i] = S->first[-i] = END; }
+  resetAssumptions (S); }
+
+int parse (struct solver* S, char* filename) {
+  int tmp; FILE *input = fopen (filename, "r");
+  do { tmp = fscanf (input, " p cnf %i %i \n", &S->nVars, &S->nClauses); // Read the first line
+    if (tmp > 0 && tmp != EOF) break; tmp = fscanf (input, "%*s\n"); }   // In case a commment line was found
+  while (tmp != 2 && tmp != EOF);                                        // Skip it and read next line
+  int nZeros = S->nClauses, buffer [S->nVars], size = 0;                 // Make a local buffer
+
+  allocate (S, S->nVars, S->nClauses);
 
   while (nZeros > 0) {
     int lit, *clause; tmp = fscanf (input, " %i ", &lit);  // Read a literal.
@@ -258,23 +285,26 @@ int parse (struct solver* S, char* filename) {
       if (!size || ((size == 1) && S->false[ clause[0] ])) // Check for empty clause or conflicting unit
         return UNSAT;                                      // If either is found return UNSAT
       if ((size == 1) && !S->false[ -clause[0] ]) {        // Check for a new unit
-        ASSIGN (clause[0], clause); }                      // Directly assign new units
+        assign (S, clause, 1); }                           // Directly assign new units (forced = 1)
       size = 0; --nZeros; }                                // Reset buffer
     else buffer[ size++ ] = lit; }                         // Add literal to buffer
+  fclose (input);
 
-  resetAssumptions (S);
-//  assume (S, -10);
-//  assume (S, 100);
-//  assume (S, -1000);
   S->mem_fixed = S->mem_used; // From now on, only redundant clauses will be added
-  fclose(input); return SAT; }
+  return SAT; }
 
+void initCDCL (struct solver* S, int n, int m) {
+  S->mem_max = MEM_MAX;
+  S->DB = (int *) malloc (sizeof(int) * S->mem_max);
+  allocate (S, n, m); }
+
+#ifdef STANDALONE
 int memory[ MEM_MAX ];
 
 int main (int argc, char** argv) {
-  struct solver S; /*int memory[ MEM_MAX ];*/ S.DB = memory;
-
-  if (parse (&S, argv[1]) == UNSAT) printf("s UNSATISFIABLE\n");  // Parse the file in argv[1]
-  else if     (solve (&S) == UNSAT) printf("s UNSATISFIABLE\n");
+  struct solver S; S.DB = memory; S.mem_max = MEM_MAX;
+  if (parse (&S, argv[1]) == UNSAT) printf("s UNSATISFIABLE\n");  // Parse the DIMACS file in argv[1]
+  else if  (solve (&S, 0) == UNSAT) printf("s UNSATISFIABLE\n");  // Solve without limit
   else                              printf("s SATISFIABLE\n")  ;
   printf("c statistics of %s: mem: %i conflicts: %i max_lemmas: %i\n", argv[1], S.mem_used, S.nConflicts, S.maxLemmas); }
+#endif
