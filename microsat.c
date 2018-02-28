@@ -31,7 +31,7 @@ enum { END = -9, UNSAT = 0, SAT = 1, MARK = 2, IMPLIED = 6 };
 
 struct solver { // The variables in the struct are described in the allocate procedure
   int  *DB, nVars, nClauses, mem_used, mem_fixed, mem_max, maxLemmas, nLemmas, *buffer, nConflicts, *model,
-       *reason, *falseStack, *false, *first, *forced, *processed, *assigned, *next, *prev, head, res, set, not; };
+       *reason, *falseStack, *false, *first, *forced, *processed, *assigned, *next, *prev, head, res, fast, slow; };
 
 void unassign (struct solver* S, int lit) { S->false[lit] = 0; }   // Unassign the literal
 
@@ -43,7 +43,6 @@ void assign (struct solver* S, int* reason, int forced) {          // Make the f
   int lit = reason[0];                                             // Let lit be the first ltieral in the reason
   S->false[-lit] = forced ? IMPLIED : 1;                           // Mark lit as true and IMPLIED if forced
   *(S->assigned++) = -lit;                                         // Push it on the assignment stack
-  if (S->model[abs (lit)] == (lit > 0)) S->not++; S->set++;        // Update the restart statistics
   S->reason[abs (lit)] = 1 + (int) ((reason)-S->DB);               // Set the reason clause of lit
   S->model [abs (lit)] = (lit > 0); }                              // Mark the literal as true in the model
 
@@ -112,14 +111,19 @@ int* analyze (struct solver* S, int* clause) {         // Compute a resolvent fr
       while (*clause) bump (S, *(clause++)); }         // MARK all literals in reason
     unassign (S, *S->assigned); }                      // Unassign the tail of the stack
 
-  build:; int size = 0;                             // Build conflict clause; Empty the clause buffer
+  build:; int size = 0, lbd = 0, flag = 0;          // Build conflict clause; Empty the clause buffer
   int* p = S->assigned;                             // Loop from tail to front
   while (p >= S->forced) {                          // Only literals on the stack can be MARKed
+    if (S->false[*p] == MARK) flag = 1;
+    if (!S->reason[abs (*p)]) { lbd += flag; flag = 0; }
     if ((S->false[*p] == MARK) && !implied (S, *p)) // If MARK and not implied by other MARKed literals
       S->buffer[size++] = *p;                       // Add literal to conflict clause buffer
     if ((size == 1) && !S->reason[abs (*p)])        // If this is the first literal in the buffer
       S->processed = p;                             // Then set the backjump point (in the search)
     S->false[*(p--)] = 1; }                         // Reset the MARK flag for all variables on the stack
+
+  S->fast -= S->fast >>  5; S->fast += lbd << 15;   // Update the fast moving average
+  S->slow -= S->slow >> 15; S->slow += lbd <<  5;   // Update the slow moving average
 
   while (S->assigned > S->processed)                // Loop over all unprocessed literals
     unassign (S, *(S->assigned--));                 // Unassign all lits between tail & head
@@ -156,18 +160,17 @@ int propagate (struct solver* S) {                  // Performs unit propagation
   return SAT; }	                                    // Finally, no conflict was found
 
 int solve (struct solver* S) {                                      // Determine satisfiability
-  int decision = S->head; S->res = S->set = S->not = 0;             // Initialize the solver
+  int decision = S->head; S->res = 0;                               // Initialize the solver
   for (;;) {                                                        // Main solve loop
     int old_nLemmas = S->nLemmas;                                   // Store nLemmas to see whether propagate adds lemmas
     if (propagate (S) == UNSAT) return UNSAT;                       // Propagation returns UNSAT for a root level conflict
 
     if (S->nLemmas > old_nLemmas) {                                 // If the last decision caused a conflict
       decision = S->head;                                           // Reset the decision heuristic to head
-      float base = (float) S->set / (float) S->not;                 // Compute the restart strategy heuristic
-      int i; for (i = 0; i < 4; i++) base *= base;                  // Based on how often the model was updated
-      if (S->res > ((int) base) || S->nLemmas > S->maxLemmas) {     // Perform a heuristical or clause deletion restart?
-        S->res = S->set = S->not = 0; restart (S); } }              // Reset the restart heuristics
-    if (S->nLemmas > S->maxLemmas) reduceDB (S, 6);                 // Reduce the DB when it contains too many lemmas
+      if (S->fast > (S->slow / 100) * 125) {                        // If fast average is substantially larger than slow average
+//        printf("c restarting after %i conflicts (%i %i) %i\n", S->res, S->fast, S->slow, S->nLemmas > S->maxLemmas);
+        S->res = 0; S->fast = (S->slow / 100) * 125; restart (S);   // Restart and update the averages
+        if (S->nLemmas > S->maxLemmas) reduceDB (S, 6); } }         // Reduce the DB when it contains too many lemmas
 
     while (S->false[decision] || S->false[-decision]) {             // As long as the temporay decision is assigned
       decision = S->prev[decision]; }                               // Replace it with the next variable in the decision list
@@ -178,14 +181,15 @@ int solve (struct solver* S) {                                      // Determine
     decision = abs(decision); S->reason[decision] = 0; } }          // Decisions have no reason clauses
 
 void initCDCL (struct solver* S, int n, int m) {
-  if (n < 1)   n = 1;                  // The code assumes that there is at least one variable
-  S->nVars       = n;                  // Set the number of variables
-  S->nClauses    = m;                  // Set the number of clauases
-  S->mem_max     = 1 << 30;            // Set the initial maximum memory
-  S->mem_used    = 0;                  // The number of integers allocated in the DB
-  S->nLemmas     = 0;                  // The number of learned clauses -- redundant means learned
-  S->nConflicts  = 0;                  // Under of conflicts which is used to updates scores
-  S->maxLemmas   = 2000;               // Initial maximum number of learnt clauses
+  if (n < 1)      n = 1;                  // The code assumes that there is at least one variable
+  S->nVars          = n;                  // Set the number of variables
+  S->nClauses       = m;                  // Set the number of clauases
+  S->mem_max        = 1 << 30;            // Set the initial maximum memory
+  S->mem_used       = 0;                  // The number of integers allocated in the DB
+  S->nLemmas        = 0;                  // The number of learned clauses -- redundant means learned
+  S->nConflicts     = 0;                  // Under of conflicts which is used to updates scores
+  S->maxLemmas      = 2000;               // Initial maximum number of learnt clauses
+  S->fast = S->slow = 1 << 24;            // Initialize the fast and slow moving averages
 
   S->DB = (int *) malloc (sizeof (int) * S->mem_max); // Allocate the initial database
   S->model       = getMemory (S, n+1); // Full assignment of the (Boolean) variables (initially set to false)
