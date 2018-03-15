@@ -91,13 +91,11 @@ void bump (struct solver* S, int lit) {                       // Move the variab
       S->prev[var] = S->head; S->head = var; } } }            // Make var the new head
 
 int implied (struct solver* S, int lit) {                  // Check if lit(eral) is implied by MARK literals
-  if (S->false[lit] > MARK) return (S->false[lit] & MARK); // If checked before return old result
   if (!S->reason[abs (lit)]) return 0;                     // In case lit is a decision, it is not implied
-  int* p = (S->DB + S->reason[abs (lit)] - 1);             // Get the reason of lit(eral)
-  while (*(++p))                                           // While there are literals in the reason
-    if ((S->false[*p] ^ MARK) && !implied (S, *p)) {       // Recursively check if non-MARK literals are implied
-      S->false[lit] = IMPLIED - 1; return 0; }             // Mark and return not implied (denoted by IMPLIED - 1)
-  S->false[lit] = IMPLIED; return 1; }                     // Mark and return that the literal is implied
+  int *p = S->DB + S->reason[abs (lit)] - 1;               // Check whether all literals in the reason are implied
+  while (*(++p)) {                                         // While there are literals in the reason
+    if (S->false[*p]^MARK && !implied(S, *p)) return 0; }  // If the literal is MARKed on not implied return 0
+  S->false[lit] = 1; return 1; }                           // UnMARK the literal and return implied
 
 int* analyze (struct solver* S, int* clause) {         // Compute a resolvent from falsified clause
   S->res++; S->nConflicts++;                           // Bump restarts and update the statistic
@@ -111,25 +109,23 @@ int* analyze (struct solver* S, int* clause) {         // Compute a resolvent fr
       while (*clause) bump (S, *(clause++)); }         // MARK all literals in reason
     unassign (S, *S->assigned); }                      // Unassign the tail of the stack
 
-  build:; int size = 0, lbd = 0, flag = 0;          // Build conflict clause; Empty the clause buffer
-  int* p = S->assigned;                             // Loop from tail to front
-  while (p >= S->forced) {                          // Only literals on the stack can be MARKed
-    if (S->false[*p] == MARK) flag = 1;
-    if (!S->reason[abs (*p)]) { lbd += flag; flag = 0; }
-    if ((S->false[*p] == MARK) && !implied (S, *p)) // If MARK and not implied by other MARKed literals
-      S->buffer[size++] = *p;                       // Add literal to conflict clause buffer
-    if ((size == 1) && !S->reason[abs (*p)])        // If this is the first literal in the buffer
-      S->processed = p;                             // Then set the backjump point (in the search)
-    S->false[*(p--)] = 1; }                         // Reset the MARK flag for all variables on the stack
+  build:; int size = 0, lbd = 0, flag = 0;             // Build conflict clause; Empty the clause buffer
+  int* p = S->processed = S->assigned;                 // Loop from tail to front
+  while (p >= S->forced) {                             // Only literals on the stack can be MARKed
+    if (S->false[*p]&MARK && !implied (S, *p)) {       // If MARKed and not implied
+      S->buffer[size++] = *p; flag = 1; }              // Add literal to conflict clause buffer
+    if (!S->reason[abs (*p)]) { lbd += flag; flag = 0; // Increase LBD for a decision with a true flag
+      if (size == 1) S->processed = p; }               // And update the processed pointer
+    S->false[*(p--)] = 1; }                            // Reset the MARK flag for all variables on the stack
 
-  S->fast -= S->fast >>  5; S->fast += lbd << 15;   // Update the fast moving average
-  S->slow -= S->slow >> 15; S->slow += lbd <<  5;   // Update the slow moving average
+  S->fast -= S->fast >>  5; S->fast += lbd << 15;      // Update the fast moving average
+  S->slow -= S->slow >> 15; S->slow += lbd <<  5;      // Update the slow moving average
 
-  while (S->assigned > S->processed)                // Loop over all unprocessed literals
-    unassign (S, *(S->assigned--));                 // Unassign all lits between tail & head
-  unassign (S, *S->assigned);                       // Assigned now equal to processed
-  S->buffer[size] = 0;                              // Terminate the buffer (and potentially print clause)
-  return addClause (S, S->buffer, size, 0); }       // Add new conflict clause to redundant DB
+  while (S->assigned > S->processed)                   // Loop over all unprocessed literals
+    unassign (S, *(S->assigned--));                    // Unassign all lits between tail & head
+  unassign (S, *S->assigned);                          // Assigned now equal to processed
+  S->buffer[size] = 0;                                 // Terminate the buffer (and potentially print clause)
+  return addClause (S, S->buffer, size, 0); }          // Add new conflict clause to redundant DB
 
 int propagate (struct solver* S) {                  // Performs unit propagation
   int forced = S->reason[abs (*S->processed)];      // Initialize forced flag
