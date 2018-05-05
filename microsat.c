@@ -97,7 +97,7 @@ int implied (struct solver* S, int lit) {                  // Check if lit(eral)
   while (*(++p))                                           // While there are literals in the reason
     if ((S->false[*p] ^ MARK) && !implied (S, *p)) {       // Recursively check if non-MARK literals are implied
       S->false[lit] = IMPLIED - 1; return 0; }             // Mark and return not implied (denoted by IMPLIED - 1)
-  S->false[lit] = IMLPIED; return 1; }                     // Mark and return that the literal is implied
+  S->false[lit] = IMPLIED; return 1; }                     // Mark and return that the literal is implied
 
 int* analyze (struct solver* S, int* clause) {         // Compute a resolvent from falsified clause
   S->res++; S->nConflicts++;                           // Bump restarts and update the statistic
