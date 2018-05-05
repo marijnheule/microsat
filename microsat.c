@@ -136,7 +136,7 @@ int propagate (struct solver* S) {                  // Performs unit propagation
     int* watch = &S->first[lit];                    // Obtain the first watch pointer
     while (*watch != END) {                         // While there are watched clauses (watched by lit)
       int i, unit = 1;                              // Let's assume that the clause is unit
-      int* clause = (S->DB + *watch + 1);	    // Get the clause from DB
+      int* clause = (S->DB + *watch + 1);           // Get the clause from DB
       if (clause[-2] ==   0) clause++;              // Set the pointer to the first literal in the clause
       if (clause[ 0] == lit) clause[0] = clause[1]; // Ensure that the other watched literal is in front
       for (i = 2; unit && clause[i]; i++)           // Scan the non-watched literals
@@ -151,11 +151,11 @@ int propagate (struct solver* S) {                  // Performs unit propagation
         if (!S->false[ clause[0]]) {                // If the other watched literal is falsified,
           assign (S, clause, forced); }             // A unit clause is found, and the reason is set
         else { if (forced) return UNSAT;            // Found a root level conflict -> UNSAT
-          int* lemma = analyze (S, clause);	    // Analyze the conflict return a conflict clause
+          int* lemma = analyze (S, clause);         // Analyze the conflict return a conflict clause
           if (!lemma[1]) forced = 1;                // In case a unit clause is found, set forced flag
           assign (S, lemma, forced); break; } } } } // Assign the conflict clause as a unit
-  if (forced) S->forced = S->processed;	            // Set S->forced if applicable
-  return SAT; }	                                    // Finally, no conflict was found
+  if (forced) S->forced = S->processed;             // Set S->forced if applicable
+  return SAT; }                                     // Finally, no conflict was found
 
 int solve (struct solver* S) {                                      // Determine satisfiability
   int decision = S->head; S->res = 0;                               // Initialize the solver
@@ -230,8 +230,8 @@ int parse (struct solver* S, char* filename) {                            // Par
   fclose (input);                                          // Close the formula file
   return SAT; }                                            // Return that no conflict was observed
 
-int main (int argc, char** argv) {			               // The main procedure for a STANDALONE solver
-  struct solver S;	                                               // Create the solver datastructure
+int main (int argc, char** argv) {                                     // The main procedure for a STANDALONE solver
+  struct solver S;                                                     // Create the solver datastructure
   if      (parse (&S, argv[1]) == UNSAT) printf("s UNSATISFIABLE\n");  // Parse the DIMACS file in argv[1]
   else if (solve (&S)          == UNSAT) printf("s UNSATISFIABLE\n");  // Solve without limit (number of conflicts)
   else                                   printf("s SATISFIABLE\n")  ;  // And print whether the formula has a solution
