@@ -40,7 +40,7 @@ void restart (struct solver* S) {                                  // Perform a 
   S->processed = S->forced; }                                      // Reset the processed pointer
 
 void assign (struct solver* S, int* reason, int forced) {          // Make the first literal of the reason true
-  int lit = reason[0];                                             // Let lit be the first ltieral in the reason
+  int lit = reason[0];                                             // Let lit be the first literal in the reason
   S->false[-lit] = forced ? IMPLIED : 1;                           // Mark lit as true and IMPLIED if forced
   *(S->assigned++) = -lit;                                         // Push it on the assignment stack
   S->reason[abs (lit)] = 1 + (int) ((reason)-S->DB);               // Set the reason clause of lit
@@ -170,7 +170,7 @@ int solve (struct solver* S) {                                      // Determine
         S->res = 0; S->fast = (S->slow / 100) * 125; restart (S);   // Restart and update the averages
         if (S->nLemmas > S->maxLemmas) reduceDB (S, 6); } }         // Reduce the DB when it contains too many lemmas
 
-    while (S->false[decision] || S->false[-decision]) {             // As long as the temporay decision is assigned
+    while (S->false[decision] || S->false[-decision]) {             // As long as the temporary decision is assigned
       decision = S->prev[decision]; }                               // Replace it with the next variable in the decision list
     if (decision == 0) return SAT;                                  // If the end of the list is reached, then a solution is found
     decision = S->model[decision] ? decision : -decision;           // Otherwise, assign the decision variable based on the model
@@ -181,7 +181,7 @@ int solve (struct solver* S) {                                      // Determine
 void initCDCL (struct solver* S, int n, int m) {
   if (n < 1)      n = 1;                  // The code assumes that there is at least one variable
   S->nVars          = n;                  // Set the number of variables
-  S->nClauses       = m;                  // Set the number of clauases
+  S->nClauses       = m;                  // Set the number of clauses
   S->mem_max        = 1 << 30;            // Set the initial maximum memory
   S->mem_used       = 0;                  // The number of integers allocated in the DB
   S->nLemmas        = 0;                  // The number of learned clauses -- redundant means learned
@@ -203,7 +203,7 @@ void initCDCL (struct solver* S, int n, int m) {
   S->first       = getMemory (S, 2*n+1); S->first += n; // Offset of the first watched clause
   S->DB[S->mem_used++] = 0;            // Make sure there is a 0 before the clauses are loaded.
 
-  int i; for (i = 1; i <= n; i++) {                        // Initialize the main datastructes:
+  int i; for (i = 1; i <= n; i++) {                        // Initialize the main datastructures:
     S->prev [i] = i - 1; S->next[i-1] = i;                 // the double-linked list for variable-move-to-front,
     S->model[i] = S->false[-i] = S->false[i] = 0;          // the model (phase-saving), the false array,
     S->first[i] = S->first[-i] = END; }                    // and first (watch pointers).
@@ -212,7 +212,7 @@ void initCDCL (struct solver* S, int n, int m) {
 int parse (struct solver* S, char* filename) {                            // Parse the formula and initialize
   int tmp; FILE* input = fopen (filename, "r");                           // Read the CNF file
   do { tmp = fscanf (input, " p cnf %i %i \n", &S->nVars, &S->nClauses);  // Find the first non-comment line
-    if (tmp > 0 && tmp != EOF) break; tmp = fscanf (input, "%*s\n"); }    // In case a commment line was found
+    if (tmp > 0 && tmp != EOF) break; tmp = fscanf (input, "%*s\n"); }    // In case a comment line was found
   while (tmp != 2 && tmp != EOF);                                         // Skip it and read next line
 
   initCDCL (S, S->nVars, S->nClauses);                     // Allocate the main datastructures
