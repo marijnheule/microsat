@@ -209,8 +209,14 @@ void initCDCL (struct solver* S, int n, int m) {
     S->first[i] = S->first[-i] = END; }                    // and first (watch pointers).
   S->head = n; }                                           // Initialize the head of the double-linked list
 
+static void read_until_new_line (FILE * input) {
+  int ch; while ((ch = getc (input)) != '\n')
+    if (ch == EOF) { printf ("parse error: unexpected EOF"); exit (1); } }
+
 int parse (struct solver* S, char* filename) {                            // Parse the formula and initialize
   int tmp; FILE* input = fopen (filename, "r");                           // Read the CNF file
+  while ((tmp = getc (input)) == 'c') read_until_new_line (input);
+  ungetc (tmp, input);
   do { tmp = fscanf (input, " p cnf %i %i \n", &S->nVars, &S->nClauses);  // Find the first non-comment line
     if (tmp > 0 && tmp != EOF) break; tmp = fscanf (input, "%*s\n"); }    // In case a commment line was found
   while (tmp != 2 && tmp != EOF);                                         // Skip it and read next line
@@ -218,6 +224,10 @@ int parse (struct solver* S, char* filename) {                            // Par
   initCDCL (S, S->nVars, S->nClauses);                     // Allocate the main datastructures
   int nZeros = S->nClauses, size = 0;                      // Initialize the number of clauses to read
   while (nZeros > 0) {                                     // While there are clauses in the file
+    int ch = getc (input);
+    if (ch == ' ' || ch == '\n') continue;
+    if (ch == 'c') { read_until_new_line (input); continue; }
+    ungetc (ch, input);
     int lit = 0; tmp = fscanf (input, " %i ", &lit);       // Read a literal.
     if (!lit) {                                            // If reaching the end of the clause
       int* clause = addClause (S, S->buffer, size, 1);     // Then add the clause to data_base
