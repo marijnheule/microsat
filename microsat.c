@@ -29,7 +29,7 @@
 
 enum { END = -9, UNSAT = 0, SAT = 1, MARK = 2, IMPLIED = 6 };
 
-struct solver { // The variables in the struct are described in the allocate procedure
+struct solver { // The variables in the struct are described in the initCDCL procedure
   int  *DB, nVars, nClauses, mem_used, mem_fixed, mem_max, maxLemmas, nLemmas, *buffer, nConflicts, *model,
        *reason, *falseStack, *false, *first, *forced, *processed, *assigned, *next, *prev, head, res, fast, slow; };
 
@@ -40,7 +40,7 @@ void restart (struct solver* S) {                                  // Perform a 
   S->processed = S->forced; }                                      // Reset the processed pointer
 
 void assign (struct solver* S, int* reason, int forced) {          // Make the first literal of the reason true
-  int lit = reason[0];                                             // Let lit be the first ltieral in the reason
+  int lit = reason[0];                                             // Let lit be the first literal in the reason
   S->false[-lit] = forced ? IMPLIED : 1;                           // Mark lit as true and IMPLIED if forced
   *(S->assigned++) = -lit;                                         // Push it on the assignment stack
   S->reason[abs (lit)] = 1 + (int) ((reason)-S->DB);               // Set the reason clause of lit
@@ -63,7 +63,7 @@ int* addClause (struct solver* S, int* in, int size, int irr) {    // Adds a cla
                    addWatch (S, in[1], used+1); }                  // Two watch pointers to the datastructure
   for (i = 0; i < size; i++) clause[i] = in[i]; clause[i] = 0;     // Copy the clause from the buffer to the database
   if (irr) S->mem_fixed = S->mem_used; else S->nLemmas++;          // Update the statistics
-  return clause; }                                                 // Return the pointer to the clause is the database
+  return clause; }                                                 // Return the pointer to the clause in the database
 
 void reduceDB (struct solver* S, int k) {                     // Removes "less useful" lemmas from DB
   while (S->nLemmas > S->maxLemmas) S->maxLemmas += 300;      // Allow more lemmas in the future
@@ -181,12 +181,12 @@ int solve (struct solver* S) {                                      // Determine
 void initCDCL (struct solver* S, int n, int m) {
   if (n < 1)      n = 1;                  // The code assumes that there is at least one variable
   S->nVars          = n;                  // Set the number of variables
-  S->nClauses       = m;                  // Set the number of clauases
+  S->nClauses       = m;                  // Set the number of clauses
   S->mem_max        = 1 << 30;            // Set the initial maximum memory
   S->mem_used       = 0;                  // The number of integers allocated in the DB
   S->nLemmas        = 0;                  // The number of learned clauses -- redundant means learned
-  S->nConflicts     = 0;                  // Under of conflicts which is used to updates scores
-  S->maxLemmas      = 2000;               // Initial maximum number of learnt clauses
+  S->nConflicts     = 0;                  // Number of conflicts, used to updates scores
+  S->maxLemmas      = 2000;               // Initial maximum number of learned clauses
   S->fast = S->slow = 1 << 24;            // Initialize the fast and slow moving averages
 
   S->DB = (int *) malloc (sizeof (int) * S->mem_max); // Allocate the initial database
@@ -203,7 +203,7 @@ void initCDCL (struct solver* S, int n, int m) {
   S->first       = getMemory (S, 2*n+1); S->first += n; // Offset of the first watched clause
   S->DB[S->mem_used++] = 0;            // Make sure there is a 0 before the clauses are loaded.
 
-  int i; for (i = 1; i <= n; i++) {                        // Initialize the main datastructes:
+  int i; for (i = 1; i <= n; i++) {                        // Initialize the main datastructures:
     S->prev [i] = i - 1; S->next[i-1] = i;                 // the double-linked list for variable-move-to-front,
     S->model[i] = S->false[-i] = S->false[i] = 0;          // the model (phase-saving), the false array,
     S->first[i] = S->first[-i] = END; }                    // and first (watch pointers).
