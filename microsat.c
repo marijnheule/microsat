@@ -185,7 +185,7 @@ void initCDCL (struct solver* S, int n, int m) {
   S->mem_max        = 1 << 30;            // Set the initial maximum memory
   S->mem_used       = 0;                  // The number of integers allocated in the DB
   S->nLemmas        = 0;                  // The number of learned clauses -- redundant means learned
-  S->nConflicts     = 0;                  // Number of conflicts, used to updates scores
+  S->nConflicts     = 0;                  // Number of conflicts used to update scores
   S->maxLemmas      = 2000;               // Initial maximum number of learned clauses
   S->fast = S->slow = 1 << 24;            // Initialize the fast and slow moving averages
 
