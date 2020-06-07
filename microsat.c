@@ -72,7 +72,7 @@ void reduceDB (struct solver* S, int k) {                     // Removes "less u
   int i; for (i = -S->nVars; i <= S->nVars; i++) {            // Loop over the variables
     if (i == 0) continue; int* watch = &S->first[i];          // Get the pointer to the first watched clause
     while (*watch != END)                                     // As long as there are watched clauses
-      if (*watch < S->mem_fixed) watch = (S->DB + *watch);    // Remove the watch if it points to a lemma
+      if (*watch >= S->mem_fixed) watch = (S->DB + *watch);    // Remove the watch if it points to a lemma
       else                      *watch =  S->DB[  *watch]; }  // Otherwise (meaning an input clause) go to next watch
 
   int old_used = S->mem_used; S->mem_used = S->mem_fixed;     // Virtually remove all lemmas
