@@ -229,6 +229,8 @@ int parse (struct solver* S, char* filename) {                            // Par
     if (ch == 'c') { read_until_new_line (input); continue; }
     ungetc (ch, input);
     int lit = 0; tmp = fscanf (input, " %i ", &lit);       // Read a literal.
+    if (tmp == EOF) {
+      printf ("s parse error: header incorrect\n"); exit (0); }
     if (!lit) {                                            // If reaching the end of the clause
       int* clause = addClause (S, S->buffer, size, 1);     // Then add the clause to data_base
       if (!size || ((size == 1) && S->false[clause[0]]))   // Check for empty clause or conflicting unit
