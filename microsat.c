@@ -207,6 +207,7 @@ void initCDCL (struct solver* S, int n, int m) {
     S->prev [i] = i - 1; S->next[i-1] = i;                 // the double-linked list for variable-move-to-front,
     S->model[i] = S->false[-i] = S->false[i] = 0;          // the model (phase-saving), the false array,
     S->first[i] = S->first[-i] = END; }                    // and first (watch pointers).
+  S->false[0] = 0;                                         // Ensure decision 0 is unassigned.
   S->head = n; }                                           // Initialize the head of the double-linked list
 
 static void read_until_new_line (FILE * input) {
